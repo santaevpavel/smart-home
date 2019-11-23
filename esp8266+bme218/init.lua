@@ -8,6 +8,7 @@ MQTT_CLIENT_PASSWORD = "XXX"
 MQTT_SEND_PERIOD = 10 * 1000
 MQTT_TEMPERATURE_TOPIC = "/ESP/DHT/TEMP"
 MQTT_HUMIDITY_TOPIC = "/ESP/DHT/HUM"
+MQTT_RELAY_TOPIC = "/ESP/RELAY"
 TEMP_MAX = 50
 TEMP_MIN = -30
 TEMP_ERROR_DELTA = 1
@@ -17,6 +18,7 @@ HUMI_ERROR_DELTA = 1
 BME_SDA_PIN = 6
 BME_SCL_PIN = 5
 TIMER_WIFI_UPDATE_PERIOD = 5 * 1000
+PIN_INDEX_RELAY = 1
 
 print("Starting...")
 tmr.delay(5 * 1000 * 1000)
@@ -38,6 +40,8 @@ i2c.setup(0, BME_SDA_PIN, BME_SCL_PIN, i2c.SLOW)
 tmr.delay(1000 * 1000)
 print("Settings up bme280...")
 bme280.setup()
+
+gpio.mode(PIN_INDEX_RELAY, gpio.OUTPUT)
 
 wifiTimer = tmr.create()
 mqttTemperatureAndHumidityTimer = tmr.create()
@@ -78,16 +82,15 @@ function onWifiConnected()
         mqttTemperatureAndHumidityTimer:stop()
         print("MQTT offline")
     end)
-    mqttClient:on("message", function(_, topic, data)
-        print(topic .. ":")
-        if data ~= nil then
-            print(data)
-        end
-    end)
 
     print("Connecting to MQTT broker")
     mqttClient:connect(MQTT_BROKER_IP, MQTT_BROKER_PORT, 0, function(_)
         print("Connected to MQTT broker")
+
+        mqttClient:on("message", function(_, topic, data)
+            onMqttMessageReceive(topic, data)
+        end)
+        mqttClient:subscribe(MQTT_RELAY_TOPIC,0, function(_) print("subscribe success!!!") end)
 
         mqttTemperatureAndHumidityTimer:alarm(MQTT_SEND_PERIOD, 1, function()
             sendTemperatureAndHumidity(mqttClient)
@@ -105,7 +108,7 @@ function sendTemperatureAndHumidity(mqttClient)
 
         print("Temperature = " .. temperature .. " humidity = " .. humidity)
 
-        local isTemperatureMqttSent = mqttClient:publish(MQTT_HUMIDITY_TOPIC, temperature, 0, 0, function(_)
+        local isTemperatureMqttSent = mqttClient:publish(MQTT_TEMPERATURE_TOPIC, temperature, 0, 0, function(_)
             print("Temperature sent")
         end)
         local isHumidityMqttSent = mqttClient:publish(MQTT_HUMIDITY_TOPIC, humidity, 0, 0, function(_)
@@ -114,5 +117,26 @@ function sendTemperatureAndHumidity(mqttClient)
         print("MQTT send temp result = ", isTemperatureMqttSent, ", MQTT send humidity result = ", isHumidityMqttSent)
     else
         print("Unable to read temp and hum from sensor")
+    end
+end
+
+function onMqttMessageReceive(topic, data)
+    if data ~= nil then
+        print("Mqtt message receive " .. topic .. " --> " .. data)
+        if topic == MQTT_RELAY_TOPIC then
+            toggleRelay(data)
+        end
+    end
+end
+
+function toggleRelay(value)
+    if value == "0" then
+        gpio.write(PIN_INDEX_RELAY, gpio.LOW)
+    else
+        if value == "1" then
+            gpio.write(PIN_INDEX_RELAY, gpio.HIGH)
+        else
+        end
+
     end
 end

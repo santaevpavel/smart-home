@@ -14,7 +14,7 @@ HUMI_MIN = 0
 HUMI_ERROR_DELTA = 1
 BME_SDA_PIN = 6
 BME_SCL_PIN = 5
-TIMER_ALART_PERIOD = 5 * 1000
+TIMER_WIFI_UPDATE_PERIOD = 5 * 1000
 
 print("Starting...")
 tmr.delay(5 * 1000 * 1000)
@@ -39,7 +39,7 @@ bme280.setup()
 wifiTimer = tmr.create()
 mqttTimer = tmr.create()
 
-wifiTimer:alarm(TIMER_ALART_PERIOD, tmr.ALARM_AUTO, function()
+wifiTimer:alarm(TIMER_WIFI_UPDATE_PERIOD, tmr.ALARM_AUTO, function()
     print("Alarm wifiTimer "..wifi.STA_GOTIP)
     print("Wifi old status = "..wifi_status_old..", new status = "..wifi.sta.status())
 
@@ -71,14 +71,7 @@ wifiTimer:alarm(TIMER_ALART_PERIOD, tmr.ALARM_AUTO, function()
 
                     local humi, temp = bme280.humi()
                     if humi ~= nil and temp ~= nil then
-                        local formattedTemp = string.format("%d.%03d", temp / 100, temp % 100)
-                        local formattedHum = string.format("%d.%03d", humi / 1000, humi % 1000)
-
-                        print("TEMP = "..formattedTemp)
-                        print("HUMI = "..formattedHum)
-
-                        tmr.delay(100)
-                        local formattedTemp = string.format("%d.%03d", temp / 100, temp % 100)
+                        local formattedTemp = string.format("%d.%02d", temp / 100, temp % 100)
                         local formattedHum = string.format("%d.%03d", humi / 1000, humi % 1000)
 
                         print("TEMP = "..formattedTemp)

@@ -1,11 +1,7 @@
-WIFI_SSID = "XXX"
-WIFI_PASS = "XXX"
-MQTT_BROKER_IP = "192.168.0.0"
-MQTT_BROKER_PORT = 1883
-MQTT_CLIENT_ID = "esp1"
-MQTT_CLIENT_USER = "XXX"
-MQTT_CLIENT_PASSWORD = "XXX"
-MQTT_SEND_PERIOD = 10 * 1000
+dofile("secrets.lua")
+dofile("utils.lua")
+
+MQTT_SEND_PERIOD = timerSeconds(10)
 MQTT_TEMPERATURE_TOPIC = "/ESP/DHT/TEMP"
 MQTT_HUMIDITY_TOPIC = "/ESP/DHT/HUM"
 MQTT_RELAY_TOPIC = "/ESP/RELAY"
@@ -15,40 +11,47 @@ TEMP_ERROR_DELTA = 1
 HUMI_MAX = 100
 HUMI_MIN = 0
 HUMI_ERROR_DELTA = 1
-BME_SDA_PIN = 6
-BME_SCL_PIN = 5
-TIMER_WIFI_UPDATE_PERIOD = 5 * 1000
-PIN_INDEX_RELAY = 1
-
-print("Starting...")
-tmr.delay(5 * 1000 * 1000)
-
-print("Connect to wifi...")
-wifi.setmode(wifi.STATION)
-
-station_cfg = {}
-station_cfg.ssid = WIFI_SSID
-station_cfg.pwd = WIFI_PASS
-
-wifi.sta.config(station_cfg)
-wifi.sta.connect()
+TIMER_WIFI_UPDATE_PERIOD = timerSeconds(10)
+PIN_BME_SDA = 6
+PIN_BME_SCL = 5
+PIN_RELAY = 1
 
 local wifiStatusOld = 0
 
-print("Settings up i2c bme280...")
-i2c.setup(0, BME_SDA_PIN, BME_SCL_PIN, i2c.SLOW)
-tmr.delay(1000 * 1000)
-print("Settings up bme280...")
-bme280.setup()
 
-gpio.mode(PIN_INDEX_RELAY, gpio.OUTPUT)
+function main()
+    print("Starting...")
+    tmr.delay(5 * 1000 * 1000)
 
-wifiTimer = tmr.create()
-mqttTemperatureAndHumidityTimer = tmr.create()
+    setup()
 
-wifiTimer:alarm(TIMER_WIFI_UPDATE_PERIOD, tmr.ALARM_AUTO, function()
-    onWifiTimerTick()
-end)
+    wifiTimer:alarm(TIMER_WIFI_UPDATE_PERIOD, tmr.ALARM_AUTO, function()
+        onWifiTimerTick()
+    end)
+end
+
+function setup()
+    print("Connect to wifi...")
+    wifi.setmode(wifi.STATION)
+
+    station_cfg = {}
+    station_cfg.ssid = WIFI_SSID
+    station_cfg.pwd = WIFI_PASS
+
+    wifi.sta.config(station_cfg)
+    wifi.sta.connect()
+
+    print("Settings up i2c bme280...")
+    i2c.setup(0, PIN_BME_SDA, PIN_BME_SCL, i2c.SLOW)
+    tmr.delay(1000 * 1000)
+    print("Settings up bme280...")
+    bme280.setup()
+
+    gpio.mode(PIN_RELAY, gpio.OUTPUT)
+
+    wifiTimer = tmr.create()
+    mqttTemperatureAndHumidityTimer = tmr.create()
+end
 
 function onWifiTimerTick()
     print("Alarm wifiTimer " .. wifi.STA_GOTIP)
@@ -131,12 +134,14 @@ end
 
 function toggleRelay(value)
     if value == "0" then
-        gpio.write(PIN_INDEX_RELAY, gpio.LOW)
+        gpio.write(PIN_RELAY, gpio.LOW)
     else
         if value == "1" then
-            gpio.write(PIN_INDEX_RELAY, gpio.HIGH)
+            gpio.write(PIN_RELAY, gpio.HIGH)
         else
         end
 
     end
 end
+
+main()

@@ -1,23 +1,10 @@
-dofile("secrets.lua")
 dofile("utils.lua")
+dofile("constants.lua")
+dofile("web.lua")
 
-MQTT_SEND_PERIOD = timerSeconds(10)
-MQTT_TEMPERATURE_TOPIC = "/ESP/DHT/TEMP"
-MQTT_HUMIDITY_TOPIC = "/ESP/DHT/HUM"
-MQTT_RELAY_TOPIC = "/ESP/RELAY"
-TEMP_MAX = 50
-TEMP_MIN = -30
-TEMP_ERROR_DELTA = 1
-HUMI_MAX = 100
-HUMI_MIN = 0
-HUMI_ERROR_DELTA = 1
-TIMER_WIFI_UPDATE_PERIOD = timerSeconds(10)
-PIN_BME_SDA = 6
-PIN_BME_SCL = 5
-PIN_RELAY = 1
-
-local wifiStatusOld = 0
-
+wifiStatusOld = 0
+settingsMqttSendPeriod = MQTT_SEND_PERIOD
+settingsWifiUpdatePeriod = TIMER_WIFI_UPDATE_PERIOD
 
 function main()
     print("Starting...")
@@ -25,9 +12,9 @@ function main()
 
     setup()
 
-    wifiTimer:alarm(TIMER_WIFI_UPDATE_PERIOD, tmr.ALARM_AUTO, function()
-        onWifiTimerTick()
-    end)
+    startWifiTimer()
+
+    setupServer()
 end
 
 function setup()
@@ -69,6 +56,7 @@ function onWifiTimerTick()
 
     -- save wifi status
     wifiStatusOld = wifi.sta.status()
+    collectgarbage()
 end
 
 function onWifiConnected()
@@ -93,22 +81,19 @@ function onWifiConnected()
         mqttClient:on("message", function(_, topic, data)
             onMqttMessageReceive(topic, data)
         end)
-        mqttClient:subscribe(MQTT_RELAY_TOPIC,0, function(_) print("subscribe success!!!") end)
-
-        mqttTemperatureAndHumidityTimer:alarm(MQTT_SEND_PERIOD, 1, function()
-            sendTemperatureAndHumidity(mqttClient)
+        mqttClient:subscribe(MQTT_RELAY_TOPIC, 0, function(_)
+            print("subscribe success!!!")
         end)
+
+        startMqttTimer(mqttClient)
     end, function(_, reason)
         print("Unable to connect to MQTT broker, reason " .. reason)
     end)
 end
 
 function sendTemperatureAndHumidity(mqttClient)
-    local humidityRaw, temperatureRaw = bme280.humi()
-    if humidityRaw ~= nil and temperatureRaw ~= nil then
-        local temperature = string.format("%d.%02d", temperatureRaw / 100, temperatureRaw % 100)
-        local humidity = string.format("%d.%03d", humidityRaw / 1000, humidityRaw % 1000)
-
+    local humidity, temperature = readTemperatureAndHumidity()
+    if humidity ~= nil and temperature ~= nil then
         print("Temperature = " .. temperature .. " humidity = " .. humidity)
 
         local isTemperatureMqttSent = mqttClient:publish(MQTT_TEMPERATURE_TOPIC, temperature, 0, 0, function(_)
@@ -121,6 +106,17 @@ function sendTemperatureAndHumidity(mqttClient)
     else
         print("Unable to read temp and hum from sensor")
     end
+end
+
+function readTemperatureAndHumidity()
+    local humidityRaw, temperatureRaw = bme280.humi()
+    local temperature
+    local humidity
+    if humidityRaw ~= nil and temperatureRaw ~= nil then
+        temperature = string.format("%d.%02d", temperatureRaw / 100, temperatureRaw % 100)
+        humidity = string.format("%d.%03d", humidityRaw / 1000, humidityRaw % 1000)
+    end
+    return humidity, temperature
 end
 
 function onMqttMessageReceive(topic, data)
@@ -142,6 +138,32 @@ function toggleRelay(value)
         end
 
     end
+end
+
+function restartWifiTimer()
+    wifiTimer:stop()
+    wifiTimer:alarm(settingsWifiUpdatePeriod, tmr.ALARM_AUTO, function()
+        onWifiTimerTick()
+    end)
+end
+
+function restartMqttTimer()
+    mqttTemperatureAndHumidityTimer:stop()
+    mqttTemperatureAndHumidityTimer:alarm(settingsMqttSendPeriod, 1, function()
+        sendTemperatureAndHumidity(mqttClient)
+    end)
+end
+
+function startWifiTimer()
+    wifiTimer:alarm(settingsWifiUpdatePeriod, tmr.ALARM_AUTO, function()
+        onWifiTimerTick()
+    end)
+end
+
+function startMqttTimer(mqttClient)
+    mqttTemperatureAndHumidityTimer:alarm(settingsMqttSendPeriod, 1, function()
+        sendTemperatureAndHumidity(mqttClient)
+    end)
 end
 
 main()

@@ -91,8 +91,16 @@ function onWifiConnected()
     end)
 end
 
-function sendTemperatureAndHumidity(mqttClient)
+function sendWeatherData(mqttClient)
     local humidity, temperature = readTemperatureAndHumidity()
+    local co2 = adc.read(0)
+    if co2 ~= nil then
+        print("CO2 = " .. co2)
+        local isCO2MqttSent = mqttClient:publish(MQTT_CO2_TOPIC, co2, 0, 0, function(_)
+            print("Temperature sent")
+        end)
+        print("MQTT send CO2 result = ", isCO2MqttSent)
+    end
     if humidity ~= nil and temperature ~= nil then
         print("Temperature = " .. temperature .. " humidity = " .. humidity)
 
@@ -150,7 +158,7 @@ end
 function restartMqttTimer()
     mqttTemperatureAndHumidityTimer:stop()
     mqttTemperatureAndHumidityTimer:alarm(settingsMqttSendPeriod, 1, function()
-        sendTemperatureAndHumidity(mqttClient)
+        sendWeatherData(mqttClient)
     end)
 end
 
@@ -162,7 +170,7 @@ end
 
 function startMqttTimer(mqttClient)
     mqttTemperatureAndHumidityTimer:alarm(settingsMqttSendPeriod, 1, function()
-        sendTemperatureAndHumidity(mqttClient)
+        sendWeatherData(mqttClient)
     end)
 end
 

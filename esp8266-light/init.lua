@@ -3,6 +3,7 @@ dofile("constants.lua")
 
 wifiStatusOld = 0
 settingsMqttSendPeriod = MQTT_SEND_PERIOD
+settingsMqttConnectionPeriod = MQTT_CONNECT_PERIOD
 settingsWifiUpdatePeriod = TIMER_WIFI_UPDATE_PERIOD
 
 function main()
@@ -12,7 +13,6 @@ function main()
     setup()
 
     startWifiTimer()
-
 end
 
 function setup()
@@ -29,10 +29,13 @@ function setup()
     gpio.mode(PIN_RELAY, gpio.OUTPUT)
 
     wifiTimer = tmr.create()
-    mqttTemperatureAndHumidityTimer = tmr.create()
+    mqttSendStatusTimer = tmr.create()
+    mqttConnectionTimer = tmr.create()
 
     relayState = "0"
     gpio.write(PIN_RELAY, gpio.LOW)
+
+    setupButton()
 end
 
 function onWifiTimerTick()
@@ -45,7 +48,7 @@ function onWifiTimerTick()
         end
     else
         print("Reconnect " .. wifiStatusOld .. " " .. wifi.sta.status())
-        mqttTemperatureAndHumidityTimer:stop()
+        stopMqttConnectionTimer()
         wifi.sta.connect()
     end
 
@@ -60,29 +63,32 @@ function onWifiConnected()
 
     local mqttClient = mqtt.Client(MQTT_CLIENT_ID, 120, MQTT_CLIENT_USER, MQTT_CLIENT_PASSWORD)
 
-    -- Mqtt event handlers
     mqttClient:on("connect", function(_)
         print("MQTT connected")
     end)
     mqttClient:on("offline", function(_)
-        mqttTemperatureAndHumidityTimer:stop()
         print("MQTT offline")
+        stopMqttTimer()
+        startMqttConnectionTimer(mqttClient)
     end)
+    connectToMqttBroker(mqttClient)
+end
 
+function connectToMqttBroker(mqttClient)
     print("Connecting to MQTT broker")
     mqttClient:connect(MQTT_BROKER_IP, MQTT_BROKER_PORT, 0, function(_)
         print("Connected to MQTT broker")
-
+        stopMqttConnectionTimer()
         mqttClient:on("message", function(_, topic, data)
             onMqttMessageReceive(topic, data)
         end)
         mqttClient:subscribe(MQTT_RELAY_TOPIC, 0, function(_)
-            print("subscribe success!!!")
+            print("Subscribed to MQTT broker")
         end)
-
         startMqttTimer(mqttClient)
     end, function(_, reason)
         print("Unable to connect to MQTT broker, reason " .. reason)
+        startMqttConnectionTimer(mqttClient)
     end)
 end
 
@@ -101,7 +107,7 @@ function onMqttMessageReceive(topic, data)
         return
     end
     if data ~= nil then
-        print("Mqtt message receive " .. topic .. " --> " .. data)
+        print("MQTT message receive " .. topic .. " --> " .. data)
         if topic == MQTT_RELAY_TOPIC then
             toggleRelay(data)
         end
@@ -109,6 +115,7 @@ function onMqttMessageReceive(topic, data)
 end
 
 function toggleRelay(value)
+    lastDetection = tmr.now()
     if value == "0" then
         relayState = "0"
         gpio.write(PIN_RELAY, gpio.LOW)
@@ -123,20 +130,6 @@ function toggleRelay(value)
     end
 end
 
-function restartWifiTimer()
-    wifiTimer:stop()
-    wifiTimer:alarm(settingsWifiUpdatePeriod, tmr.ALARM_AUTO, function()
-        onWifiTimerTick()
-    end)
-end
-
-function restartMqttTimer()
-    mqttTemperatureAndHumidityTimer:stop()
-    mqttTemperatureAndHumidityTimer:alarm(settingsMqttSendPeriod, 1, function()
-        sendRelayState(mqttClient)
-    end)
-end
-
 function startWifiTimer()
     wifiTimer:alarm(settingsWifiUpdatePeriod, tmr.ALARM_AUTO, function()
         onWifiTimerTick()
@@ -144,8 +137,42 @@ function startWifiTimer()
 end
 
 function startMqttTimer(mqttClient)
-    mqttTemperatureAndHumidityTimer:alarm(settingsMqttSendPeriod, 1, function()
+    mqttSendStatusTimer:alarm(settingsMqttSendPeriod, 1, function()
         sendRelayState(mqttClient)
+    end)
+end
+
+function stopMqttTimer()
+    mqttSendStatusTimer:stop()
+end
+
+function startMqttConnectionTimer(mqttClient)
+    mqttConnectionTimer:alarm(settingsMqttConnectionPeriod, 1, function()
+        connectToMqttBroker(mqttClient)
+    end)
+end
+
+function stopMqttConnectionTimer()
+    mqttConnectionTimer:stop()
+end
+
+lastDetection = 0
+
+function setupButton()
+    gpio.mode(2, gpio.INT)
+    gpio.trig(2, "up", function(level, when)
+        local delay = when - lastDetection
+        print("Motion detected! " .. level .. "  " .. delay)
+        if delay > BUTTON_CHANGE_STATE_DELAY or delay < 0 then
+            if level == 1 then
+                if relayState == "0" then
+                    toggleRelay("1")
+                else
+                    toggleRelay("0")
+                end
+            end
+            lastDetection = when
+        end
     end)
 end
 

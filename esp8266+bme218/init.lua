@@ -5,6 +5,7 @@ dofile("web.lua")
 wifiStatusOld = 0
 settingsMqttSendPeriod = MQTT_SEND_PERIOD
 settingsWifiUpdatePeriod = TIMER_WIFI_UPDATE_PERIOD
+settingsSleepDelay = TIMER_SLEEP_DELAY
 
 function main()
     print("Starting...")
@@ -13,8 +14,6 @@ function main()
     setup()
 
     startWifiTimer()
-
-    setupServer()
 end
 
 function setup()
@@ -34,24 +33,31 @@ function setup()
     print("Settings up bme280...")
     bme280.setup()
 
-    gpio.mode(PIN_RELAY, gpio.OUTPUT)
-
     wifiTimer = tmr.create()
     mqttTemperatureAndHumidityTimer = tmr.create()
+    sleepTimer = tmr.create()
+
+    wifiConnectAttempts = 0
+    mqttConnectAttempts = 0
 end
 
 function onWifiTimerTick()
     print("Alarm wifiTimer " .. wifi.STA_GOTIP)
-    print("Wifi old status = " .. wifiStatusOld .. ", new status = " .. wifi.sta.status())
+    print("Wifi old status = " .. wifiStatusOld .. ", new status = " .. wifi.sta.status() .. ", wifiConnectAttempts " .. wifiConnectAttempts)
 
     if wifi.sta.status() == wifi.STA_GOTIP then
         if wifiStatusOld ~= wifi.STA_GOTIP then
             onWifiConnected()
         end
     else
-        print("Reconnect " .. wifiStatusOld .. " " .. wifi.sta.status())
-        mqttTemperatureAndHumidityTimer:stop()
-        wifi.sta.connect()
+        if wifiConnectAttempts >= 3 then
+            startSleepTimer()
+        else
+            print("Reconnect " .. wifiStatusOld .. " " .. wifi.sta.status())
+            mqttTemperatureAndHumidityTimer:stop()
+            wifi.sta.connect()
+            wifiConnectAttempts = wifiConnectAttempts + 1
+        end
     end
 
     -- save wifi status
@@ -77,30 +83,15 @@ function onWifiConnected()
     print("Connecting to MQTT broker")
     mqttClient:connect(MQTT_BROKER_IP, MQTT_BROKER_PORT, 0, function(_)
         print("Connected to MQTT broker")
-
-        mqttClient:on("message", function(_, topic, data)
-            onMqttMessageReceive(topic, data)
-        end)
-        mqttClient:subscribe(MQTT_RELAY_TOPIC, 0, function(_)
-            print("subscribe success!!!")
-        end)
-
-        startMqttTimer(mqttClient)
+        sendWeatherData(mqttClient)
     end, function(_, reason)
         print("Unable to connect to MQTT broker, reason " .. reason)
+        startSleepTimer()
     end)
 end
 
 function sendWeatherData(mqttClient)
     local humidity, temperature = readTemperatureAndHumidity()
-    local co2 = adc.read(0)
-    if co2 ~= nil then
-        print("CO2 = " .. co2)
-        local isCO2MqttSent = mqttClient:publish(MQTT_CO2_TOPIC, co2, 0, 0, function(_)
-            print("Temperature sent")
-        end)
-        print("MQTT send CO2 result = ", isCO2MqttSent)
-    end
     if humidity ~= nil and temperature ~= nil then
         print("Temperature = " .. temperature .. " humidity = " .. humidity)
 
@@ -114,6 +105,12 @@ function sendWeatherData(mqttClient)
     else
         print("Unable to read temp and hum from sensor")
     end
+    startSleepTimer()
+end
+
+function enableDeepSleep()
+    print("Go to deep sleep")
+    node.dsleep(SLEEP_TIME)
 end
 
 function readTemperatureAndHumidity()
@@ -127,27 +124,6 @@ function readTemperatureAndHumidity()
     return humidity, temperature
 end
 
-function onMqttMessageReceive(topic, data)
-    if data ~= nil then
-        print("Mqtt message receive " .. topic .. " --> " .. data)
-        if topic == MQTT_RELAY_TOPIC then
-            toggleRelay(data)
-        end
-    end
-end
-
-function toggleRelay(value)
-    if value == "0" then
-        gpio.write(PIN_RELAY, gpio.LOW)
-    else
-        if value == "1" then
-            gpio.write(PIN_RELAY, gpio.HIGH)
-        else
-        end
-
-    end
-end
-
 function restartWifiTimer()
     wifiTimer:stop()
     wifiTimer:alarm(settingsWifiUpdatePeriod, tmr.ALARM_AUTO, function()
@@ -155,12 +131,6 @@ function restartWifiTimer()
     end)
 end
 
-function restartMqttTimer()
-    mqttTemperatureAndHumidityTimer:stop()
-    mqttTemperatureAndHumidityTimer:alarm(settingsMqttSendPeriod, 1, function()
-        sendWeatherData(mqttClient)
-    end)
-end
 
 function startWifiTimer()
     wifiTimer:alarm(settingsWifiUpdatePeriod, tmr.ALARM_AUTO, function()
@@ -168,9 +138,9 @@ function startWifiTimer()
     end)
 end
 
-function startMqttTimer(mqttClient)
-    mqttTemperatureAndHumidityTimer:alarm(settingsMqttSendPeriod, 1, function()
-        sendWeatherData(mqttClient)
+function startSleepTimer()
+    sleepTimer:alarm(settingsSleepDelay, tmr.ALARM_AUTO, function()
+        enableDeepSleep()
     end)
 end
 
